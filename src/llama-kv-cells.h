@@ -1,0 +1,259 @@
+#pragma once
+
+#include <bitset>
+#include <cassert>
+#include <vector>
+
+using llama_pos    = int32_t;
+using llama_seq_id = int32_t;
+
+// meta information about KV cells that can be part of multiple sequences at the same time
+// TODO: add unit tests
+struct llama_kv_cells_unified {
+    void reset() {
+        for (uint32_t i = 0; i < pos.size(); ++i) {
+            pos[i]   = -1;
+            delta[i] =  0;
+            seq[i].reset();
+        }
+
+        used      = 0;
+        has_delta = false;
+    }
+
+    uint32_t size() const {
+        return pos.size();
+    }
+
+    void resize(uint32_t n) {
+        pos.resize(n);
+        delta.resize(n);
+        seq.resize(n);
+
+        reset();
+    }
+
+    bool is_empty(uint32_t i) const {
+        assert(i < pos.size());
+        assert((pos[i] < 0 && pos[i] == -1) || pos[i] >= 0);
+
+        return pos[i] == -1;
+    }
+
+    uint32_t get_used() const {
+        return used;
+    }
+
+    // move cell isrc to idst
+    void mv(uint32_t isrc, uint32_t idst) {
+        assert(isrc < pos.size());
+        assert(idst < pos.size());
+
+        pos  [idst] = pos  [isrc];
+        delta[idst] = delta[isrc];
+        seq  [idst] = seq  [isrc];
+
+        pos  [isrc] = -1;
+        delta[isrc] =  0;
+        seq  [isrc].reset();
+    }
+
+    // copy the state of cells [i, i + n)
+    llama_kv_cells_unified cp(uint32_t i, uint32_t n) const {
+        assert(i + n <= pos.size());
+
+        llama_kv_cells_unified res;
+
+        res.resize(n);
+
+        for (uint32_t j = 0; j < n; ++j) {
+            res.pos[j] = pos[i + j];
+            res.seq[j] = seq[i + j];
+
+            assert(delta[i + j] == 0);
+        }
+
+        return res;
+    }
+
+    // set the state of cells [i, i + other.pos.size())
+    void set(uint32_t i, const llama_kv_cells_unified & other) {
+        assert(i + other.pos.size() <= pos.size());
+
+        for (uint32_t j = 0; j < other.pos.size(); ++j) {
+            if (pos[i + j] == -1 && other.pos[j] != -1) {
+                used++;
+            }
+
+            if (pos[i + j] != -1 && other.pos[j] == -1) {
+                used--;
+            }
+
+            pos[i + j] = other.pos[j];
+            seq[i + j] = other.seq[j];
+
+            assert(delta[i + j] == 0);
+        }
+    }
+
+    // note: call only if the cell has seq_id
+    // return true if the cell becomes empty
+    bool seq_rm(uint32_t i, llama_seq_id seq_id) {
+        assert(i < pos.size());
+        assert(seq[i].test(seq_id));
+        assert(pos[i] != -1);
+        assert(seq_id >= 0);
+
+        seq[i].reset(seq_id);
+
+        if (seq[i].none()) {
+            pos[i]= -1;
+
+            used--;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    // return true if the cell becomes empty (i.e. it did not contain seq_id before the call)
+    bool seq_keep(uint32_t i, llama_seq_id seq_id) {
+        assert(i < pos.size());
+
+        if (seq[i].test(seq_id)) {
+            seq[i].reset();
+            seq[i].set(seq_id);
+
+            return false;
+        }
+
+        if (seq[i].any()) {
+            seq[i].reset();
+            pos[i] = -1;
+
+            used--;
+
+            return true;
+        }
+
+        assert(pos[i] == -1);
+
+        return false;
+    }
+
+    bool seq_has(uint32_t i, llama_seq_id seq_id) const {
+        assert(i < pos.size());
+        assert(seq_id >= 0);
+
+        return seq[i].test(seq_id);
+    }
+
+    // note: call only if the cell is not empty
+    bool seq_add(uint32_t i, llama_seq_id seq_id) {
+        assert(i < pos.size());
+        assert(pos[i] != -1);
+
+        if (seq[i].none()) {
+            seq[i].set(seq_id);
+
+            used++;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    // note: call only if the cell is not empty
+    llama_pos get_pos(uint32_t i) const {
+        assert(i < pos.size());
+        assert(pos[i] != -1);
+
+        return pos[i];
+    }
+
+    // note: call only if the cell is not empty
+    llama_pos get_delta(uint32_t i) const {
+        assert(i < pos.size());
+        assert(pos[i] != -1);
+
+        return delta[i];
+    }
+
+    bool pos_in(uint32_t i, llama_pos p0, llama_pos p1) const {
+        assert(i < pos.size());
+
+        return pos[i] >= p0 && pos[i] < p1;
+    }
+
+    // note: call only if the cell is empty
+    void pos_set(uint32_t i, llama_pos p) {
+        assert(i < pos.size());
+        assert(pos[i] == -1);
+
+        pos[i] = p;
+        used++;
+    }
+
+    // pos[i] = pos[i] + d
+    // note: call only if the cell is not empty
+    bool pos_add(uint32_t i, llama_pos d) {
+        assert(i < pos.size());
+        assert(pos[i] != -1);
+
+        pos[i]   += d;
+        delta[i] += d;
+
+        has_delta = true;
+
+        if (pos[i] < 0) {
+            pos[i] = -1;
+            seq[i].reset();
+
+            used--;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    // pos[i] = pos[i] / d
+    // note: call only if the cell is not empty
+    void pos_div(uint32_t i, int d) {
+        assert(i < pos.size());
+        assert(pos[i] != -1);
+
+        const llama_pos p_old = pos[i];
+
+        pos[i]   /= d;
+        delta[i] += p_old - pos[i];
+
+        has_delta = true;
+    }
+
+    bool pos_has_shift() const {
+        return has_delta;
+    }
+
+    void pos_reset_delta() {
+        has_delta = false;
+
+        for (uint32_t i = 0; i < delta.size(); ++i) {
+            delta[i] = 0;
+        }
+    }
+
+private:
+    uint32_t used = 0; // used cells (i.e. at least one seq_id)
+
+    bool has_delta = false;
+
+    std::vector<llama_pos> pos;
+    std::vector<llama_pos> delta;
+
+    // TODO: assert n_seq_max <= 64
+    std::vector<std::bitset<64>> seq;
+};
+
