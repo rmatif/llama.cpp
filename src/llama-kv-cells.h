@@ -194,12 +194,15 @@ public:
         return shift[i];
     }
 
+    // check if a cell is not empty and its position is within [p0, p1)
     bool pos_in(uint32_t i, llama_pos p0, llama_pos p1) const {
         assert(i < pos.size());
 
         return pos[i] >= p0 && pos[i] < p1;
     }
 
+    // set the position of an empty cell
+    // does not modify "has_shift"
     // note: call only if the cell is empty
     void pos_set(uint32_t i, llama_pos p) {
         assert(i < pos.size());
@@ -210,6 +213,7 @@ public:
     }
 
     // pos[i] = pos[i] + d
+    // sets "has_shift" to true
     // note: call only if the cell is not empty
     bool pos_add(uint32_t i, llama_pos d) {
         assert(i < pos.size());
@@ -233,6 +237,7 @@ public:
     }
 
     // pos[i] = pos[i] / d
+    // sets "has_shift" to true
     // note: call only if the cell is not empty
     void pos_div(uint32_t i, int d) {
         assert(i < pos.size());
@@ -267,7 +272,6 @@ private:
     //
     std::vector<llama_pos> shift;
 
-    // TODO: assert n_seq_max <= 64
     std::vector<std::bitset<LLAMA_MAX_PARALLEL_SEQUENCES>> seq;
 };
 
