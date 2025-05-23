@@ -57,7 +57,7 @@ public:
         return has_shift;
     }
 
-    // move cell isrc to idst
+    // move cell isrc to idst (used during defrag)
     void mv(uint32_t isrc, uint32_t idst) {
         assert(isrc < pos.size());
         assert(idst < pos.size());
@@ -71,7 +71,7 @@ public:
         seq  [isrc].reset();
     }
 
-    // copy the state of cells [i, i + n)
+    // copy the state of cells [i, i + n) (used for save/restore the state of the cells)
     llama_kv_cells_unified cp(uint32_t i, uint32_t n) const {
         assert(i + n <= pos.size());
 
@@ -89,7 +89,7 @@ public:
         return res;
     }
 
-    // set the state of cells [i, i + other.pos.size())
+    // set the state of cells [i, i + other.pos.size()) (used for save/restore the state of the cells)
     void set(uint32_t i, const llama_kv_cells_unified & other) {
         assert(i + other.pos.size() <= pos.size());
 
@@ -179,7 +179,7 @@ public:
     }
 
     // note: call only if the cell is not empty
-    llama_pos get_pos(uint32_t i) const {
+    llama_pos pos_get(uint32_t i) const {
         assert(i < pos.size());
         assert(pos[i] != -1);
 
@@ -264,11 +264,14 @@ private:
     //   cells.pos_add(x, shift_x);
     //   cells.pos_div(y, shift_y);
     //   ...
-    //   for (int i = 0; i < n; ++i) {
-    //       auto shift_i = cells.get_shift(i);
-    //       ...
+    //
+    //   if (cells.has_shift()) {
+    //      for (int i = 0; i < n; ++i) {
+    //          auto shift_i = cells.get_shift(i);
+    //          ...
+    //      }
+    //      cells.reset_shift();
     //   }
-    //   cells.reset_shift();
     //
     std::vector<llama_pos> shift;
 

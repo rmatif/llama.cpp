@@ -290,7 +290,7 @@ llama_pos llama_kv_cache_unified::seq_pos_min(llama_seq_id seq_id) const {
 
     for (uint32_t i = 0; i < cells.size(); ++i) {
         if (cells.seq_has(i, seq_id)) {
-            result = std::min(result, cells.get_pos(i));
+            result = std::min(result, cells.pos_get(i));
         }
     }
 
@@ -306,7 +306,7 @@ llama_pos llama_kv_cache_unified::seq_pos_max(llama_seq_id seq_id) const {
 
     for (uint32_t i = 0; i < cells.size(); ++i) {
         if (cells.seq_has(i, seq_id)) {
-            result = std::max(result, cells.get_pos(i));
+            result = std::max(result, cells.pos_get(i));
         }
     }
 
@@ -611,7 +611,7 @@ void llama_kv_cache_unified::prune_swa(llama_seq_id seq_id, llama_pos pmin, llam
             continue;
         }
 
-        const llama_pos p0 = cells.get_pos(i);
+        const llama_pos p0 = cells.pos_get(i);
 
         if (p0 <= pmin && !is_masked_swa(p0, pmin)) {
             n_attended++;
@@ -664,7 +664,7 @@ void llama_kv_cache_unified::set_input_kq_mask(ggml_tensor * dst, const llama_ub
                     if (cells.is_empty(i)) {
                         masked = true;
                     } else {
-                        const llama_pos p0 = cells.get_pos(i);
+                        const llama_pos p0 = cells.pos_get(i);
 
                         // mask the token if not the same sequence
                         masked = masked || (!cells.seq_has(i, seq_id));
@@ -724,7 +724,7 @@ void llama_kv_cache_unified::set_input_pos_bucket(ggml_tensor * dst, const llama
         for (int j = 0; j < n_tokens; ++j) {
             for (int i = 0; i < n_kv; ++i) {
                 // the position when the cells is empty is irrelevant - it will be masked out later in the attention
-                const llama_pos p0 = cells.is_empty(i) ? -1 : cells.get_pos(i);
+                const llama_pos p0 = cells.is_empty(i) ? -1 : cells.pos_get(i);
 
                 data[h*(n_kv*n_tokens) + j*n_kv + i] = llama_relative_position_bucket(p0, ubatch->pos[j], hparams.n_rel_attn_bkts, false);
             }
@@ -1250,7 +1250,7 @@ void llama_kv_cache_unified::state_write_meta(llama_io_write_i & io, const std::
                 }
             }
 
-            const llama_pos pos     = cells.get_pos(i);
+            const llama_pos pos     = cells.pos_get(i);
             const uint32_t n_seq_id = seq_ids.size();
 
             io.write(&pos,      sizeof(pos));
@@ -1394,8 +1394,8 @@ bool llama_kv_cache_unified::state_read_meta(llama_io_read_i & io, uint32_t cell
         // DEBUG CHECK: kv.head should be our first cell, kv.head + cell_count - 1 should be our last cell (verify seq_id and pos values)
         // Assume that this is one contiguous block of cells
         GGML_ASSERT(head + cell_count <= cells.size());
-        GGML_ASSERT(cells.get_pos(head)                  == batch.pos[0]);
-        GGML_ASSERT(cells.get_pos(head + cell_count - 1) == batch.pos[cell_count - 1]);
+        GGML_ASSERT(cells.pos_get(head)                  == batch.pos[0]);
+        GGML_ASSERT(cells.pos_get(head + cell_count - 1) == batch.pos[cell_count - 1]);
         GGML_ASSERT(cells.seq_has(head,                  dest_seq_id));
         GGML_ASSERT(cells.seq_has(head + cell_count - 1, dest_seq_id));
     } else {
