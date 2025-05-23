@@ -217,8 +217,8 @@ void llama_kv_cache_unified::seq_keep(llama_seq_id seq_id) {
     }
 }
 
-void llama_kv_cache_unified::seq_add(llama_seq_id seq_id, llama_pos p0, llama_pos p1, llama_pos delta) {
-    if (delta == 0) {
+void llama_kv_cache_unified::seq_add(llama_seq_id seq_id, llama_pos p0, llama_pos p1, llama_pos shift) {
+    if (shift == 0) {
         return;
     }
 
@@ -243,7 +243,7 @@ void llama_kv_cache_unified::seq_add(llama_seq_id seq_id, llama_pos p0, llama_po
         }
 
         if (cells.seq_has(i, seq_id)) {
-            if (cells.pos_add(i, delta)) {
+            if (cells.pos_add(i, shift)) {
                 if (new_head == cells.size()) {
                     new_head = i;
                 }
@@ -336,7 +336,7 @@ bool llama_kv_cache_unified::update(llama_context & lctx) {
 
     auto * sched = lctx.get_sched();
 
-    if (cells.pos_has_shift()) {
+    if (cells.get_has_shift()) {
         if (!get_can_shift()) {
             GGML_ABORT("The current KV cache / model configuration does not support K-shift");
         }
@@ -360,7 +360,7 @@ bool llama_kv_cache_unified::update(llama_context & lctx) {
             need_reserve = true;
         }
 
-        cells.pos_reset_delta();
+        cells.reset_shift();
     }
 
     if (do_defrag) {
@@ -706,7 +706,7 @@ void llama_kv_cache_unified::set_input_k_shift(ggml_tensor * dst) const {
     int32_t * data = (int32_t *) dst->data;
 
     for (uint32_t i = 0; i < cells.size(); ++i) {
-        data[i] = cells.is_empty(i) ? 0 : cells.get_delta(i);
+        data[i] = cells.is_empty(i) ? 0 : cells.get_shift(i);
     }
 }
 
@@ -1631,9 +1631,9 @@ void llama_kv_cache_unified_iswa::seq_keep(llama_seq_id seq_id) {
     kv_swa ->seq_keep(seq_id);
 }
 
-void llama_kv_cache_unified_iswa::seq_add(llama_seq_id seq_id, llama_pos p0, llama_pos p1, llama_pos delta) {
-    kv_base->seq_add(seq_id, p0, p1, delta);
-    kv_swa ->seq_add(seq_id, p0, p1, delta);
+void llama_kv_cache_unified_iswa::seq_add(llama_seq_id seq_id, llama_pos p0, llama_pos p1, llama_pos shift) {
+    kv_base->seq_add(seq_id, p0, p1, shift);
+    kv_swa ->seq_add(seq_id, p0, p1, shift);
 }
 
 void llama_kv_cache_unified_iswa::seq_div(llama_seq_id seq_id, llama_pos p0, llama_pos p1, int d) {
@@ -2005,8 +2005,8 @@ void llama_kv_cache_recurrent::seq_keep(llama_seq_id seq_id) {
     }
 }
 
-void llama_kv_cache_recurrent::seq_add(llama_seq_id seq_id, llama_pos p0, llama_pos p1, llama_pos delta) {
-    if (delta == 0) {
+void llama_kv_cache_recurrent::seq_add(llama_seq_id seq_id, llama_pos p0, llama_pos p1, llama_pos shift) {
+    if (shift == 0) {
         return;
     }
 
@@ -2029,7 +2029,7 @@ void llama_kv_cache_recurrent::seq_add(llama_seq_id seq_id, llama_pos p0, llama_
         if (tail_id >= 0) {
             kv_cell & cell = cells[tail_id];
             if (cell.has_seq_id(seq_id) && p0 <= cell.pos && cell.pos < p1) {
-                cell.pos += delta;
+                cell.pos += shift;
             }
         }
     }

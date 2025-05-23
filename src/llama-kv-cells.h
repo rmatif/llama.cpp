@@ -1,24 +1,32 @@
 #pragma once
 
+#include "llama.h"
+
 #include <bitset>
 #include <cassert>
 #include <vector>
 
-using llama_pos    = int32_t;
-using llama_seq_id = int32_t;
-
 // meta information about KV cells that can be part of multiple sequences at the same time
 // TODO: add unit tests
-struct llama_kv_cells_unified {
+class llama_kv_cells_unified {
+public:
     void reset() {
         for (uint32_t i = 0; i < pos.size(); ++i) {
             pos[i]   = -1;
-            delta[i] =  0;
+            shift[i] =  0;
             seq[i].reset();
         }
 
         used      = 0;
-        has_delta = false;
+        has_shift = false;
+    }
+
+    void reset_shift() {
+        has_shift = false;
+
+        for (uint32_t i = 0; i < shift.size(); ++i) {
+            shift[i] = 0;
+        }
     }
 
     uint32_t size() const {
@@ -27,7 +35,7 @@ struct llama_kv_cells_unified {
 
     void resize(uint32_t n) {
         pos.resize(n);
-        delta.resize(n);
+        shift.resize(n);
         seq.resize(n);
 
         reset();
@@ -44,17 +52,21 @@ struct llama_kv_cells_unified {
         return used;
     }
 
+    bool get_has_shift() const {
+        return has_shift;
+    }
+
     // move cell isrc to idst
     void mv(uint32_t isrc, uint32_t idst) {
         assert(isrc < pos.size());
         assert(idst < pos.size());
 
         pos  [idst] = pos  [isrc];
-        delta[idst] = delta[isrc];
+        shift[idst] = shift[isrc];
         seq  [idst] = seq  [isrc];
 
         pos  [isrc] = -1;
-        delta[isrc] =  0;
+        shift[isrc] =  0;
         seq  [isrc].reset();
     }
 
@@ -70,7 +82,7 @@ struct llama_kv_cells_unified {
             res.pos[j] = pos[i + j];
             res.seq[j] = seq[i + j];
 
-            assert(delta[i + j] == 0);
+            assert(shift[i + j] == 0);
         }
 
         return res;
@@ -92,7 +104,7 @@ struct llama_kv_cells_unified {
             pos[i + j] = other.pos[j];
             seq[i + j] = other.seq[j];
 
-            assert(delta[i + j] == 0);
+            assert(shift[i + j] == 0);
         }
     }
 
@@ -174,11 +186,11 @@ struct llama_kv_cells_unified {
     }
 
     // note: call only if the cell is not empty
-    llama_pos get_delta(uint32_t i) const {
+    llama_pos get_shift(uint32_t i) const {
         assert(i < pos.size());
         assert(pos[i] != -1);
 
-        return delta[i];
+        return shift[i];
     }
 
     bool pos_in(uint32_t i, llama_pos p0, llama_pos p1) const {
@@ -203,9 +215,9 @@ struct llama_kv_cells_unified {
         assert(pos[i] != -1);
 
         pos[i]   += d;
-        delta[i] += d;
+        shift[i] += d;
 
-        has_delta = true;
+        has_shift = true;
 
         if (pos[i] < 0) {
             pos[i] = -1;
@@ -228,30 +240,31 @@ struct llama_kv_cells_unified {
         const llama_pos p_old = pos[i];
 
         pos[i]   /= d;
-        delta[i] += p_old - pos[i];
+        shift[i] += p_old - pos[i];
 
-        has_delta = true;
-    }
-
-    bool pos_has_shift() const {
-        return has_delta;
-    }
-
-    void pos_reset_delta() {
-        has_delta = false;
-
-        for (uint32_t i = 0; i < delta.size(); ++i) {
-            delta[i] = 0;
-        }
+        has_shift = true;
     }
 
 private:
     uint32_t used = 0; // used cells (i.e. at least one seq_id)
 
-    bool has_delta = false;
+    bool has_shift = false;
 
     std::vector<llama_pos> pos;
-    std::vector<llama_pos> delta;
+
+    // this array accumulates any applied shifts to the pos array since the last reset_shift() call
+    // this is used to queue multiple updates to the pos array, which in the end can be applied in one go:
+    //
+    //   cells.pos_add(x, shift_x);
+    //   cells.pos_div(y, shift_y);
+    //   ...
+    //   for (int i = 0; i < n; ++i) {
+    //       auto shift_i = cells.get_shift(i);
+    //       ...
+    //   }
+    //   cells.reset_shift();
+    //
+    std::vector<llama_pos> shift;
 
     // TODO: assert n_seq_max <= 64
     std::vector<std::bitset<64>> seq;
