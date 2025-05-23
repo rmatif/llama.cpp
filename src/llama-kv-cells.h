@@ -1,6 +1,7 @@
 #pragma once
 
 #include "llama.h"
+#include "llama-cparams.h"
 
 #include <bitset>
 #include <cassert>
@@ -119,7 +120,7 @@ public:
         seq[i].reset(seq_id);
 
         if (seq[i].none()) {
-            pos[i]= -1;
+            pos[i] = -1;
 
             used--;
 
@@ -267,6 +268,6 @@ private:
     std::vector<llama_pos> shift;
 
     // TODO: assert n_seq_max <= 64
-    std::vector<std::bitset<64>> seq;
+    std::vector<std::bitset<LLAMA_MAX_PARALLEL_SEQUENCES>> seq;
 };
 
