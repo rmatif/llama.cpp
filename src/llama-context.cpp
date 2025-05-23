@@ -27,8 +27,7 @@ llama_context::llama_context(
 
     cparams.n_seq_max = std::max(1u, params.n_seq_max);
     if (cparams.n_seq_max > LLAMA_MAX_PARALLEL_SEQUENCES) {
-        LLAMA_LOG_WARN("%s: n_seq_max (%d) is larger than the maximum supported (%d) - clamping\n", __func__, cparams.n_seq_max, LLAMA_MAX_PARALLEL_SEQUENCES);
-        cparams.n_seq_max = LLAMA_MAX_PARALLEL_SEQUENCES;
+        throw std::runtime_error("n_seq_max must be <= " + std::to_string(LLAMA_MAX_PARALLEL_SEQUENCES));
     }
 
     cparams.n_threads        = params.n_threads;
