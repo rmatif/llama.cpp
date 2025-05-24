@@ -162,20 +162,13 @@ public:
         return seq[i].test(seq_id);
     }
 
-    // note: call only if the cell is not empty
-    bool seq_add(uint32_t i, llama_seq_id seq_id) {
+    // note: call only if the cell is not empty and the seq_id is not in the cell
+    void seq_add(uint32_t i, llama_seq_id seq_id) {
         assert(i < pos.size());
         assert(pos[i] != -1);
+        assert(!seq[i].test(seq_id));
 
-        if (seq[i].none()) {
-            seq[i].set(seq_id);
-
-            used++;
-
-            return true;
-        }
-
-        return false;
+        seq[i].set(seq_id);
     }
 
     // note: call only if the cell is not empty
@@ -252,7 +245,7 @@ public:
     }
 
 private:
-    uint32_t used = 0; // used cells (i.e. at least one seq_id)
+    uint32_t used = 0; // used cells (i.e. pos[i] != -1, allowed to not have any seq_id)
 
     bool has_shift = false;
 
