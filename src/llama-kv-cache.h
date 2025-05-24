@@ -126,12 +126,13 @@ public:
     // return empty vector on failure
     std::vector<uint32_t> prepare(const std::vector<llama_ubatch> & ubatches);
 
-    // find a place in the cache for the ubatch
-    // return -1 on failure to find a free slot of kv cells
+    // return the cell position where we can insert the ubatch
+    // return -1 on failure to find a contiguous slot of kv cells
     int32_t find_slot(const llama_ubatch & ubatch) const;
 
+    // emplace the ubatch context into cells [head_cur, head_cur + ubatch.n_tokens)
     // updates head = head_cur
-    void fill_slot(const llama_ubatch & ubatch, uint32_t head_cur);
+    void fill_slot(uint32_t head_cur, const llama_ubatch & ubatch);
 
     void set_input_kq_mask   (ggml_tensor * dst, const llama_ubatch * ubatch, bool causal_attn) const;
     void set_input_k_shift   (ggml_tensor * dst) const;
@@ -178,23 +179,6 @@ private:
 
     // model layer id -> KV cache layer id
     std::unordered_map<int32_t, int32_t> map_layer_ids;
-
-    // recovery information used to restore the KV cells to their original state
-    // note: this member is only used to avoid extra memory allocations when calling prepare(), its state is not persisted
-    struct {
-        void clear() {
-            states.clear();
-        }
-
-        struct state {
-            uint32_t head;
-
-            llama_kv_cells_unified cells;
-        };
-
-        // stack with the partial states before each ubatch
-        std::vector<state> states;
-    } recovery;
 
     // defrag
     struct {
@@ -309,22 +293,6 @@ public:
 private:
     const llama_hparams & hparams;
 
-    bool do_prune = true;
-
-    struct {
-        struct entry {
-            llama_pos pmin;
-            llama_pos pmax;
-        };
-
-        void clear() {
-            pos.clear();
-        }
-
-        // used to perform SWA pruning of old tokens
-        std::unordered_map<llama_seq_id, entry> pos;
-    } pending;
-
     std::unique_ptr<llama_kv_cache_unified> kv_base;
     std::unique_ptr<llama_kv_cache_unified> kv_swa;
 };
@@ -335,26 +303,6 @@ private:
 
 class llama_kv_cache_recurrent : public llama_kv_cache {
 public:
-    struct kv_cell {
-        llama_pos pos  = -1;
-        int32_t   src  = -1; // used to copy states
-        int32_t   tail = -1;
-
-        std::set<llama_seq_id> seq_id;
-
-        bool has_seq_id(const llama_seq_id & id) const {
-            return seq_id.find(id) != seq_id.end();
-        }
-
-        bool is_empty() const {
-            return seq_id.empty();
-        }
-
-        bool is_same_seq(const kv_cell & other) const {
-            return seq_id == other.seq_id;
-        }
-    };
-
     llama_kv_cache_recurrent(
             const llama_model & model,
                     ggml_type   type_k,
@@ -392,13 +340,10 @@ public:
 
     void set_full() override;
 
-    // return empty vector on failure
-    std::vector<uint32_t> prepare(const std::vector<llama_ubatch> & ubatches);
+    bool prepare(const std::vector<llama_ubatch> & ubatches);
 
-    int32_t find_slot(const llama_ubatch & ubatch) const;
-
-    // updates head = head_cur
-    void fill_slot(const llama_ubatch & ubatch, uint32_t head_cur);
+    // find a contiguous slot of kv cells and emplace the ubatch there
+    bool find_slot(const llama_ubatch & ubatch);
 
     bool get_can_shift() const override;
 
@@ -418,6 +363,27 @@ public:
     // computed before each graph build
     uint32_t n = 0;
 
+    // TODO: optimize for recurrent state needs
+    struct kv_cell {
+        llama_pos pos  = -1;
+        int32_t   src  = -1; // used to copy states
+        int32_t   tail = -1;
+
+        std::set<llama_seq_id> seq_id;
+
+        bool has_seq_id(const llama_seq_id & id) const {
+            return seq_id.find(id) != seq_id.end();
+        }
+
+        bool is_empty() const {
+            return seq_id.empty();
+        }
+
+        bool is_same_seq(const kv_cell & other) const {
+            return seq_id == other.seq_id;
+        }
+    };
+
     std::vector<kv_cell> cells;
 
     std::vector<ggml_tensor *> k_l; // per layer
@@ -427,25 +393,10 @@ private:
     //const llama_model & model;
     const llama_hparams & hparams;
 
-    // commit/restore cache
-    // TODO: rework for recurrent cache
-    struct slot_range {
-        uint32_t c0 = 0; // note: these are cell indices, not sequence positions
-        uint32_t c1 = 0;
-    };
-
-    // pending cell updates that are not yet committed
-    struct {
-        std::vector<slot_range> ranges;
-    } pending;
-
     const uint32_t n_seq_max = 1;
 
     std::vector<ggml_context_ptr>        ctxs;
     std::vector<ggml_backend_buffer_ptr> bufs;
-
-    // find how many cells are currently in use
-    uint32_t cell_max() const;
 
     size_t total_size() const;
 
