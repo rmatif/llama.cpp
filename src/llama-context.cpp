@@ -1952,8 +1952,7 @@ void llama_context::opt_epoch_iter(
 
         int64_t n_outputs_all = n_tokens_all;
 
-        //llama_sbatch sbatch = kv_self->sbatch_init(batch, /*logits_all =*/ true);
-        auto decode_state = kv_self->init(batch, cparams.n_ubatch, embd_pooled, /* logits_all */ n_outputs_all == n_tokens_all);
+        auto decode_state = kv_self->init(batch, cparams.n_ubatch, embd_pooled, /* logits_all */ true);
         if (!decode_state) {
             LLAMA_LOG_ERROR("%s: could not initialize batch\n", __func__);
             break;
@@ -1968,8 +1967,6 @@ void llama_context::opt_epoch_iter(
         uint32_t pos_batch = 0;
         while (const auto * ubatch_ptr = decode_state->next()) {
             const auto & ubatch = *ubatch_ptr;
-
-            pos_batch += ubatch.n_tokens;
 
             n_outputs = ubatch.n_tokens;
 
@@ -2006,6 +2003,8 @@ void llama_context::opt_epoch_iter(
                 callback(train, opt_ctx, dataset, result, idata_in_loop + (pos_ctx + pos_batch)/n_ubatch + 1, ndata_in_loop, t_loop_start);
             }
             ggml_free(ctx_compute_opt);
+
+            pos_batch += ubatch.n_tokens;
         }
     }
 }
