@@ -22,11 +22,7 @@ struct llama_context;
 struct llama_kv_cache : public llama_memory_i {
     virtual ~llama_kv_cache() = default;
 
-    // call if batch processing fails - restores the cache state
-    virtual void restore() = 0;
-
-    // call after successful batch processing - clears any pending state
-    virtual void commit()  = 0;
+    virtual llama_memory_decode_state_ptr init(const llama_batch & batch, uint32_t n_ubatch, bool embd_pooled, bool logits_all) = 0;
 
     // process any pending defrag/shift/etc. operations
     // optionally call once before processing a new batch
@@ -39,23 +35,6 @@ struct llama_kv_cache : public llama_memory_i {
     // TODO: remove
     virtual void set_full() = 0;
 
-    //
-    // batch processing
-    //
-
-    // =============================================================================================================
-    // TODO: refactor and simplify this [TAG: KV_API]
-
-    virtual llama_sbatch sbatch_init(const llama_batch & batch, bool logits_all) = 0;
-
-    // different KV caches require different batch splitting strategies
-    virtual llama_ubatch ubatch_next(llama_sbatch & sbatch, uint32_t n_ubatch, bool embd_pooled) const = 0;
-
-    // find an empty slot of size "n_tokens" in the cache
-    virtual bool find_slot(const llama_ubatch & batch) = 0;
-
-    // =============================================================================================================
-
     // getters
     virtual bool get_can_shift() const = 0;
 
@@ -67,25 +46,6 @@ struct llama_kv_cache : public llama_memory_i {
 
     virtual void state_write(llama_io_write_i & io, llama_seq_id seq_id = -1) const = 0;
     virtual void state_read (llama_io_read_i  & io, llama_seq_id seq_id = -1) = 0;
-};
-
-//
-// llama_kv_cache_guard
-//
-
-struct llama_kv_cache_guard {
-    llama_kv_cache_guard(llama_kv_cache * kv) : kv(kv) {}
-
-    ~llama_kv_cache_guard() {
-        kv->restore();
-    }
-
-    void commit() {
-        kv->commit();
-    }
-
-private:
-    llama_kv_cache * kv;
 };
 
 //
@@ -133,22 +93,13 @@ public:
     // llama_kv_cache
     //
 
-    void restore() override;
-    void commit()  override;
+    llama_memory_decode_state_ptr init(const llama_batch & batch, uint32_t n_ubatch, bool embd_pooled, bool logits_all) override;
 
     bool update(llama_context & ctx) override;
 
     void defrag_sched(float thold) override;
 
     void set_full() override;
-
-    llama_sbatch sbatch_init(const llama_batch & batch, bool logits_all) override;
-    llama_ubatch ubatch_next(llama_sbatch & sbatch, uint32_t n_ubatch, bool embd_pooled) const override;
-
-    // updates the cache head
-    // Note: On success, it's important that cache.head points
-    // to the first cell of the slot.
-    bool find_slot(const llama_ubatch & batch) override;
 
     bool get_can_shift() const override;
 
@@ -172,7 +123,15 @@ public:
     ggml_tensor * cpy_k(ggml_context * ctx, ggml_tensor * k_cur, int32_t il) const;
     ggml_tensor * cpy_v(ggml_context * ctx, ggml_tensor * v_cur, int32_t il) const;
 
-    void prune_swa(llama_seq_id seq_id, llama_pos pmin, llama_pos pmax);
+    // return empty vector on failure
+    std::vector<uint32_t> prepare(const std::vector<llama_ubatch> & ubatches);
+
+    // find a place in the cache for the ubatch
+    // return -1 on failure to find a free slot of kv cells
+    int32_t find_slot(const llama_ubatch & ubatch) const;
+
+    // updates head = head_cur
+    void fill_slot(const llama_ubatch & ubatch, uint32_t head_cur);
 
     void set_input_kq_mask   (ggml_tensor * dst, const llama_ubatch * ubatch, bool causal_attn) const;
     void set_input_k_shift   (ggml_tensor * dst) const;
@@ -220,16 +179,15 @@ private:
     // model layer id -> KV cache layer id
     std::unordered_map<int32_t, int32_t> map_layer_ids;
 
-    // recovery information used to restore the KV cells to their original state in case of a failure
-    // TODO: do not store as a state in the llama_kv_cache object, instead return upon batch preparation
-    //       to achieve that, first need to refactor the llama_kv_cache interface [TAG: KV_API]
+    // recovery information used to restore the KV cells to their original state
+    // note: this member is only used to avoid extra memory allocations when calling prepare(), its state is not persisted
     struct {
         void clear() {
             states.clear();
         }
 
         struct state {
-            uint32_t i;
+            uint32_t head;
 
             llama_kv_cells_unified cells;
         };
@@ -289,7 +247,7 @@ private:
 
 // utilizes two instances of llama_kv_cache_unified
 //   the first instance is for the non-SWA layers of the model and the second instance is for the SWA layers
-//   upon successful commit, the SWA cache removes old tokens outside the n_swa window
+//   upon successful processing of the batch, the SWA cache removes old tokens outside the n_swa window
 
 class llama_kv_cache_unified_iswa : public llama_kv_cache {
 public:
@@ -326,19 +284,13 @@ public:
     // llama_kv_cache
     //
 
-    void restore() override;
-    void commit()  override;
+    llama_memory_decode_state_ptr init(const llama_batch & batch, uint32_t n_ubatch, bool embd_pooled, bool logits_all) override;
 
     bool update(llama_context & ctx) override;
 
     void defrag_sched(float thold) override;
 
     void set_full() override;
-
-    llama_sbatch sbatch_init(const llama_batch & batch, bool logits_all) override;
-    llama_ubatch ubatch_next(llama_sbatch & sbatch, uint32_t n_ubatch, bool embd_pooled) const override;
-
-    bool find_slot(const llama_ubatch & batch) override;
 
     bool get_can_shift() const override;
 
@@ -432,8 +384,7 @@ public:
     // llama_kv_cache
     //
 
-    void restore() override;
-    void commit()  override;
+    llama_memory_decode_state_ptr init(const llama_batch & batch, uint32_t n_ubatch, bool embd_pooled, bool logits_all) override;
 
     bool update(llama_context & ctx) override;
 
@@ -441,10 +392,13 @@ public:
 
     void set_full() override;
 
-    llama_sbatch sbatch_init(const llama_batch & batch, bool logits_all) override;
-    llama_ubatch ubatch_next(llama_sbatch & sbatch, uint32_t n_ubatch, bool embd_pooled) const override;
+    // return empty vector on failure
+    std::vector<uint32_t> prepare(const std::vector<llama_ubatch> & ubatches);
 
-    bool find_slot(const llama_ubatch & batch) override;
+    int32_t find_slot(const llama_ubatch & ubatch) const;
+
+    // updates head = head_cur
+    void fill_slot(const llama_ubatch & ubatch, uint32_t head_cur);
 
     bool get_can_shift() const override;
 
