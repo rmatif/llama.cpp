@@ -95,6 +95,12 @@ set(GGML_OPENCL_KERNELS
     sub
     sum_rows
     transpose
+    concat
+    tsembd
+    upscale
+    unary
+    pad
+    repeat
 )
 
 foreach (K ${GGML_OPENCL_KERNELS})
