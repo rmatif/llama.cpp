@@ -31,7 +31,7 @@ kernel void kernel_tanh_f32_nd(
 
             ulong dst_offset_in_tensor = (ulong)i0*nb10 + (ulong)i1*nb11 + (ulong)i2*nb12 + (ulong)i3*nb13;
             global float *dst_val_ptr = (global float *)((global char *)p_dst_base + off_dst_abs + dst_offset_in_tensor);
-            
+
             *dst_val_ptr = tanh(*src_val_ptr);
         }
     }
@@ -56,7 +56,7 @@ kernel void kernel_tanh_f16_nd(
 
             ulong dst_offset_in_tensor = (ulong)i0*nb10 + (ulong)i1*nb11 + (ulong)i2*nb12 + (ulong)i3*nb13;
             global half *dst_val_ptr = (global half *)((global char *)p_dst_base + off_dst_abs + dst_offset_in_tensor);
-            
+
             *dst_val_ptr = tanh(*src_val_ptr);
         }
     }

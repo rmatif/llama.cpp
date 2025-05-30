@@ -98,7 +98,7 @@ set(GGML_OPENCL_KERNELS
     concat
     tsembd
     upscale
-    unary
+    tanh
     pad
     repeat
 )

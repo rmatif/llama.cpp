@@ -317,7 +317,7 @@ struct ggml_backend_opencl_context {
     cl_program program_sum_rows_f32;
     cl_program program_repeat;
     cl_program program_pad;
-    cl_program program_unary;
+    cl_program program_tanh;
     cl_program program_upscale;
     cl_program program_concat;
     cl_program program_tsembd;
@@ -1154,24 +1154,24 @@ static void load_cl_kernels(ggml_backend_opencl_context *backend_ctx, ggml_cl_ve
         }
     }
 
-    // unary (tanh)
+    // tanh
     {
 #ifdef GGML_OPENCL_EMBED_KERNELS
         const std::string kernel_src {
-            #include "unary.cl.h"
+            #include "tanh.cl.h"
         };
 #else
-        const std::string kernel_src = read_file("unary.cl");
+        const std::string kernel_src = read_file("tanh.cl");
 #endif
         if (!kernel_src.empty()) {
-            backend_ctx->program_unary =
+            backend_ctx->program_tanh =
                 build_program_from_source(backend_ctx->context, backend_ctx->device, kernel_src.c_str(), compile_opts);
-            CL_CHECK((backend_ctx->kernel_tanh_f32_nd = clCreateKernel(backend_ctx->program_unary, "kernel_tanh_f32_nd", &err), err));
-            CL_CHECK((backend_ctx->kernel_tanh_f16_nd = clCreateKernel(backend_ctx->program_unary, "kernel_tanh_f16_nd", &err), err));
+            CL_CHECK((backend_ctx->kernel_tanh_f32_nd = clCreateKernel(backend_ctx->program_tanh, "kernel_tanh_f32_nd", &err), err));
+            CL_CHECK((backend_ctx->kernel_tanh_f16_nd = clCreateKernel(backend_ctx->program_tanh, "kernel_tanh_f16_nd", &err), err));
             GGML_LOG_CONT(".");
         } else {
-            GGML_LOG_WARN("ggml_opencl: unary kernel source not found or empty. Unary operations like tanh will not be available.\n");
-            backend_ctx->program_unary = nullptr;
+            GGML_LOG_WARN("ggml_opencl: tanh kernel source not found or empty. Tanh operation will not be available.\n");
+            backend_ctx->program_tanh = nullptr;
             backend_ctx->kernel_tanh_f32_nd = nullptr;
             backend_ctx->kernel_tanh_f16_nd = nullptr;
         }
@@ -2150,7 +2150,7 @@ static bool ggml_opencl_supports_op(ggml_backend_dev_t dev, const struct ggml_te
         case GGML_OP_NORM:
         case GGML_OP_RMS_NORM:
             return true;
-                case GGML_OP_REPEAT:
+        case GGML_OP_REPEAT:
             return op->src[0]->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32; // Assuming F32 for now, can be expanded
         case GGML_OP_PAD:
             return op->src[0]->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32 &&
